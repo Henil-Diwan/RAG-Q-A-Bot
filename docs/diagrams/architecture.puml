@@ -1,0 +1,76 @@
+@startuml architecture
+title RAG Q&A Bot - High-Level Architecture
+
+skinparam componentStyle rectangle
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 10
+skinparam component {
+  BackgroundColor #EAF4FF
+  BorderColor #1F6FEB
+  FontColor #0B3D91
+}
+skinparam database {
+  BackgroundColor #FFF4E5
+  BorderColor #D97706
+}
+skinparam cloud {
+  BackgroundColor #F0FDF4
+  BorderColor #16A34A
+}
+skinparam actor {
+  BackgroundColor #F3E8FF
+  BorderColor #7C3AED
+}
+
+actor "User /\nClient App" as User
+
+package "Data Ingestion (offline)" {
+  component "Website_Scraper.py\n(Playwright)" as WebScraper
+  component "discourse_downloader_full.py\n(requests)" as DiscourseScraper
+  component "Chunk + Embed\nPipeline" as Embedder
+}
+
+cloud "tds.s-anand.net\n(Course Site)" as Site
+cloud "discourse.onlinedegree\n.iitm.ac.in" as Discourse
+
+package "RAG Service (app.py)" {
+  component "FastAPI App" as API
+  component "Embedding\nClient" as EmbedClient
+  component "Vector Search\n(cosine similarity)" as Search
+  component "Context\nEnricher\n(adjacent chunks)" as Enricher
+  component "Multimodal\nHandler\n(text + image)" as Vision
+  component "Answer\nGenerator + Parser" as Gen
+}
+
+database "knowledge_base.db\n(SQLite)" as DB {
+  frame "discourse_chunks" as TblD
+  frame "markdown_chunks" as TblM
+}
+
+cloud "aipipe.org Proxy" as Proxy
+cloud "OpenAI\ntext-embedding-3-small\ngpt-4o-mini" as OpenAI
+
+Site --> WebScraper : crawl
+Discourse --> DiscourseScraper : authenticated\nJSON API
+WebScraper --> Embedder : markdown_files/
+DiscourseScraper --> Embedder : discourse_json/
+Embedder --> DB : chunks + embeddings
+
+User --> API : POST /query\n{ question, image? }
+API --> Vision : if image present
+Vision --> Proxy : Vision API
+API --> EmbedClient : question text
+EmbedClient --> Proxy : embeddings
+Proxy --> OpenAI : forwards calls
+API --> Search : query embedding
+Search --> DB : SELECT chunks
+DB --> Search : rows + stored\nembeddings
+Search --> Enricher : top-K hits
+Enricher --> DB : prev/next chunks
+Enricher --> Gen : enriched context
+Gen --> Proxy : chat completion
+Gen --> API : answer + sources
+API --> User : JSON\n{ answer, links[] }
+
+@enduml

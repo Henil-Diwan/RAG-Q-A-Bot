@@ -1,0 +1,51 @@
+@startuml ingestion_flow
+title Data Ingestion Pipeline
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam activity {
+  BackgroundColor #EAF4FF
+  BorderColor #1F6FEB
+  FontColor #0B3D91
+  DiamondBackgroundColor #FFF4E5
+  DiamondBorderColor #D97706
+  ArrowColor #1F6FEB
+}
+
+|#F0FDF4|Course Website|
+start
+:Launch headless Chromium\n(Playwright);
+:Visit BASE_URL\n(tds.s-anand.net/#/2025-01/);
+repeat
+  :Wait for article.markdown-section#main;
+  :Convert HTML -> Markdown\n(markdownify);
+  :Save .md to markdown_files/\n+ append to metadata.json;
+  :Extract internal links;
+repeat while (Unvisited links remain?) is (yes)
+->no;
+:Crawl complete;
+
+|#FFF4E5|Discourse Forum|
+start
+:Parse RAW_COOKIE_STRING\n(auth cookies);
+:GET /c/courses/tds-kb/34.json\nfor pages 0,1,2,...;
+if (Topic created within\nSTART_DATE..END_DATE?) then (yes)
+  :Collect topic_id;
+endif
+:Repeat until stale or\nno more_topics_url;
+:For each topic_id:\nGET /t/{id}.json\n+ paginate /t/{id}/posts.json;
+:Save full topic JSON\nto discourse_json/;
+
+|#F3E8FF|Chunk + Embed (offline)|
+:Read markdown_files/\nand discourse_json/;
+:Split text into overlapping chunks;
+:Call text-embedding-3-small\nvia aipipe.org for each chunk;
+
+|#FFE4E6|SQLite|
+:INSERT into markdown_chunks\n(doc_title, original_url,\n chunk_index, content, embedding);
+:INSERT into discourse_chunks\n(post_id, topic_id, topic_title,\n author, chunk_index, content,\n url, embedding);
+:knowledge_base.db ready\nfor app.py;
+stop
+
+@enduml

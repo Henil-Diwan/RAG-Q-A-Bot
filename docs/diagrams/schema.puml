@@ -1,0 +1,57 @@
+@startuml schema
+title knowledge_base.db - Schema
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 6
+skinparam class {
+  BackgroundColor #FFF4E5
+  BorderColor #D97706
+  HeaderBackgroundColor #FBBF24
+  FontColor #1F2937
+}
+
+entity "discourse_chunks" as D {
+  * id : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  post_id : INTEGER
+  topic_id : INTEGER
+  topic_title : TEXT
+  post_number : INTEGER
+  author : TEXT
+  created_at : TEXT
+  likes : INTEGER
+  chunk_index : INTEGER
+  content : TEXT
+  url : TEXT
+  embedding : BLOB  // JSON-encoded\n// 1536 floats
+}
+
+entity "markdown_chunks" as M {
+  * id : INTEGER <<PK, AUTOINCREMENT>>
+  --
+  doc_title : TEXT
+  original_url : TEXT
+  downloaded_at : TEXT
+  chunk_index : INTEGER
+  content : TEXT
+  embedding : BLOB  // JSON-encoded\n// 1536 floats
+}
+
+note right of D
+  Logical grouping for retrieval:
+  rows sharing the same **post_id**
+  represent ordered chunks of one
+  Discourse post (ordered by
+  **chunk_index**).
+end note
+
+note right of M
+  Logical grouping for retrieval:
+  rows sharing the same **doc_title**
+  represent ordered chunks of one
+  scraped Markdown document
+  (ordered by **chunk_index**).
+end note
+
+@enduml

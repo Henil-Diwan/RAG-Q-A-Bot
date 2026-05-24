@@ -1,0 +1,96 @@
+@startuml query_sequence
+title /query Request - End-to-End Sequence
+
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam sequence {
+  ArrowColor #1F6FEB
+  LifeLineBorderColor #1F6FEB
+  ParticipantBackgroundColor #EAF4FF
+  ParticipantBorderColor #1F6FEB
+  ParticipantFontColor #0B3D91
+  ActorBackgroundColor #F3E8FF
+  ActorBorderColor #7C3AED
+  DatabaseBackgroundColor #FFF4E5
+  DatabaseBorderColor #D97706
+}
+
+actor User
+participant "FastAPI\n/query" as API
+participant "process_multimodal_query" as MM
+participant "get_embedding" as Embed
+participant "find_similar_content" as Search
+database "knowledge_base.db" as DB
+participant "enrich_with_adjacent_chunks" as Enrich
+participant "generate_answer" as Gen
+participant "parse_llm_response" as Parse
+participant "aipipe.org" as Proxy
+
+User -> API : POST /query\n{ question, image? }
+activate API
+
+API -> MM : question, image_base64
+activate MM
+alt image provided
+    MM -> Proxy : gpt-4o-mini vision\n(describe image)
+    Proxy --> MM : image_description
+    MM -> Embed : combined query\n(question + description)
+else text only
+    MM -> Embed : question
+end
+activate Embed
+Embed -> Proxy : text-embedding-3-small
+Proxy --> Embed : 1536-dim vector
+Embed --> MM : embedding
+deactivate Embed
+MM --> API : query_embedding
+deactivate MM
+
+API -> Search : query_embedding
+activate Search
+Search -> DB : SELECT * FROM discourse_chunks\nWHERE embedding IS NOT NULL
+DB --> Search : rows
+Search -> DB : SELECT * FROM markdown_chunks\nWHERE embedding IS NOT NULL
+DB --> Search : rows
+loop for each chunk
+    Search -> Search : cosine_similarity(q, chunk)\nkeep if >= 0.4
+end
+Search -> Search : group by document,\nkeep top MAX_CONTEXT_CHUNKS per doc,\nreturn top MAX_RESULTS overall
+Search --> API : relevant_results
+deactivate Search
+
+alt no results
+    API --> User : "I couldn't find any relevant information..."
+else results found
+    API -> Enrich : relevant_results
+    activate Enrich
+    loop for each hit
+        Enrich -> DB : prev chunk\n(chunk_index - 1)
+        Enrich -> DB : next chunk\n(chunk_index + 1)
+    end
+    Enrich --> API : enriched_results
+    deactivate Enrich
+
+    API -> Gen : question, enriched_results
+    activate Gen
+    Gen -> Proxy : POST /chat/completions\n(gpt-4o-mini, temp=0.3)
+    Proxy --> Gen : answer + sources
+    Gen --> API : raw LLM text
+    deactivate Gen
+
+    API -> Parse : raw text
+    activate Parse
+    Parse -> Parse : split on "Sources:"\nextract URL/Text via regex
+    Parse --> API : { answer, links[] }
+    deactivate Parse
+
+    alt links empty
+        API -> API : fallback - build links\nfrom top retrieval hits
+    end
+
+    API --> User : { answer, links[] }
+end
+deactivate API
+
+@enduml
